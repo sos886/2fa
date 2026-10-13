@@ -40,7 +40,7 @@
     <div class="toast" id="toast">已複製到剪貼簿</div>
 
     <script>
-        // ======= 內建輕量化 2FA 核心演算法 (完全不依賴外部網站) =======
+        // ======= 完美修正版 2FA 核心演算法 (完全不依賴外部網站，標準HMAC-SHA1) =======
         const TOTP = {
             base32tohex: function(b32) {
                 const b32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -56,53 +56,102 @@
                 }
                 return hex;
             },
-            dec2hex: function(s) { return (s < 15.5 ? "0" : "") + Math.round(s).toString(16); },
-            hex2dec: function(s) { return parseInt(s, 16); },
-            leftpad: function(str, len, pad) { return len + 1 >= str.length ? (new Array(len + 1 - str.length).join(pad) + str) : str; },
             
-            // 內建簡易 HMAC-SHA1 實作
-            sha1: function(str) {
-                let d = [], f = [function(b,c,d){return b&c|~b&d;},function(b,c,d){return b^c^d;},function(b,c,d){return b&c|b&d|c&d;},function(b,c,d){return b^c^d;}], g = [1518500249,1859775393,-1894007588,-899497514], h = [1732584193,-271733879,-1732584194,271733878,-1009589776];
-                if (typeof str === "string") {
-                    let s = unescape(encodeURIComponent(str)), h = [];
-                    for (let i = 0; i < s.length; i++) h[i >> 2] |= s.charCodeAt(i) << (24 - (i % 4) * 8);
-                    str = h;
+            // 将十六进制字符串转为 Uint8Array 字节数组
+            hexToBytes: function(hex) {
+                let bytes = [];
+                for (let c = 0; c < hex.length; c += 2) {
+                    bytes.push(parseInt(hex.substr(c, 2), 16));
                 }
-                for (let i = 0; i < str.length; i++) d[i] = str[i];
-                let blen = d.length * 32;
-                d[blen >> 5] |= 128 << (24 - blen % 32); d[((blen + 64 >> 9) << 4) + 15] = blen;
-                for (let i = 0; i < d.length; i += 16) {
-                    let w = [], a = h[0], b = h[1], c = h[2], d_val = h[3], e = h[4];
-                    for (let j = 0; j < 80; j++) {
-                        w[j] = (j < 16) ? d[i + j] : (w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16]) << 1 | (w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16]) >>> 31;
-                        let t = (a << 5 | a >>> 27) + f[Math.floor(j/20)](b,c,d_val) + e + g[Math.floor(j/20)] + (w[j] >>> 0);
-                        e = d_val; d_val = c; c = b << 30 | b >>> 2; b = a; a = t;
-                    }
-                    h[0] += a; h[1] += b; h[2] += c; h[3] += d_val; h[4] += e;
-                }
-                return h;
+                return bytes;
             },
-            hmac_sha1: function(keyHex, messageHex) {
-                let key = [], msg = [];
-                for(let i=0; i<keyHex.length; i+=8) key.push(parseInt(keyHex.substr(i,8), 16));
-                for(let i=0; i<messageHex.length; i+=8) msg.push(parseInt(messageHex.substr(i,8), 16));
-                if(key.length > 16) key = this.sha1(key);
-                let ipad = [], opad = [];
-                for(let i=0; i<16; i++) { ipad[i] = key[i] ^ 909522486; opad[i] = key[i] ^ 1549556828; }
-                let hash = this.sha1(ipad.concat(msg));
-                return this.sha1(opad.concat(hash));
+
+            // 纯原生字节级标准 HMAC-SHA1 算法
+            hmac_sha1: function(keyBytes, msgBytes) {
+                if (keyBytes.length > 64) {
+                    keyBytes = this.sha1_raw(keyBytes);
+                }
+                while (keyBytes.length < 64) {
+                    keyBytes.push(0);
+                }
+
+                let ipad = new Array(64), opad = new Array(64);
+                for (let i = 0; i < 64; i++) {
+                    ipad[i] = keyBytes[i] ^ 0x36;
+                    opad[i] = keyBytes[i] ^ 0x5C;
+                }
+
+                let innerHash = this.sha1_raw(ipad.concat(msgBytes));
+                return this.sha1_raw(opad.concat(innerHash));
+            },
+
+            sha1_raw: function(bytes) {
+                let words = [];
+                for (let i = 0; i < bytes.length; i++) {
+                    words[i >> 2] |= bytes[i] << (24 - (i % 4) * 8);
+                }
+                
+                let blen = bytes.length * 8;
+                words[blen >> 5] |= 128 << (24 - blen % 32);
+                words[((blen + 64 >> 9) << 4) + 15] = blen;
+
+                let h0 = 1732584193, h1 = -271733879, h2 = -1732584194, h3 = 271733878, h4 = -1009589776;
+                let w = new Array(80);
+
+                for (let i = 0; i < words.length; i += 16) {
+                    let a = h0, b = h1, c = h2, d = h3, e = h4;
+                    for (let j = 0; j < 80; j++) {
+                        if (j < 16) {
+                            w[j] = words[i + j] || 0;
+                        } else {
+                            let num = w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16];
+                            w[j] = (num << 1) | (num >>> 31);
+                        }
+                        
+                        let f, k;
+                        if (j < 20) {
+                            f = (b & c) | (~b & d); k = 1518500249;
+                        } else if (j < 40) {
+                            f = b ^ c ^ d; k = 1859775393;
+                        } else if (j < 60) {
+                            f = (b & c) | (b & d) | (c & d); k = -1894007588;
+                        } else {
+                            f = b ^ c ^ d; k = -899497514;
+                        }
+
+                        let t = ((a << 5) | (a >>> 27)) + f + e + k + (w[j] >>> 0);
+                        e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = t;
+                    }
+                    h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
+                }
+
+                let result = [];
+                let hArray = [h0, h1, h2, h3, h4];
+                for (let i = 0; i < 5; i++) {
+                    for (let j = 3; j >= 0; j--) {
+                        result.push((hArray[i] >> (j * 8)) & 0xFF);
+                    }
+                }
+                return result;
             },
             
             getOTP: function(secret) {
                 try {
-                    let key = this.base32tohex(secret);
+                    let keyHex = this.base32tohex(secret);
+                    let keyBytes = this.hexToBytes(keyHex);
                     let epoch = Math.floor(new Date().getTime() / 1000);
-                    let time = this.leftpad(Math.floor(epoch / 30).toString(16), 16, "0");
-                    let hmac = this.hmac_sha1(key, time);
-                    let hmacHex = hmac.map(h => this.leftpad((h >>> 0).toString(16), 8, "0")).join('');
-                    let offset = this.hex2dec(hmacHex.substring(hmacHex.length - 1));
-                    let otp = (this.hex2dec(hmacHex.substr(offset * 2, 8)) & this.hex2dec("7fffffff")) + "";
-                    otp = otp.substr(otp.length - 6, 6).padStart(6, '0');
+                    let timeHex = Math.floor(epoch / 30).toString(16).padStart(16, "0");
+                    let msgBytes = this.hexToBytes(timeHex);
+                    
+                    let hmacBytes = this.hmac_sha1(keyBytes, msgBytes);
+                    let offset = hmacBytes[hmacBytes.length - 1] & 0xf;
+                    
+                    let otpVal = ((hmacBytes[offset] & 0x7f) << 24) |
+                                 ((hmacBytes[offset + 1] & 0xff) << 16) |
+                                 ((hmacBytes[offset + 2] & 0xff) << 8) |
+                                 (hmacBytes[offset + 3] & 0xff);
+                                 
+                    let otp = (otpVal % 1000000).toString().padStart(6, '0');
                     return otp;
                 } catch (e) {
                     return "ERROR";
@@ -136,7 +185,7 @@
                 document.getElementById('auth-code').innerText = "ERROR";
                 document.getElementById('title-text').innerText = "密鑰格式不正確";
             } else {
-                document.getElementById('auth-code').innerText = token;
+                document.getElementById('auth-code').innerText = token.slice(0, 3) + " " + token.slice(3);
             }
         }
 
