@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2FA 驗證碼生成器</title>
+    <style>
+        body {
+            margin: 0; padding: 0;
+            background-color: #171a2b;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; color: #7b839b; user-select: none;
+        }
+        .container { text-align: center; width: 100%; max-width: 400px; padding: 20px; }
+        .title { font-size: 16px; margin-bottom: 24px; letter-spacing: 1px; }
+        .code-box {
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px; padding: 24px 0; margin-bottom: 16px;
+            cursor: pointer; transition: background-color 0.2s, border-color 0.2s;
+        }
+        .code-box:hover { background-color: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.2); }
+        .code-text { font-family: "Times New Roman", Georgia, serif; font-size: 48px; color: #ffffff; letter-spacing: 2px; font-weight: 500; }
+        .countdown { font-size: 13px; margin-bottom: 8px; }
+        .hint { font-size: 11px; color: #4b5268; }
+        .toast { position: fixed; bottom: 30px; background: rgba(255, 255, 255, 0.9); color: #171a2b; padding: 8px 16px; border-radius: 4px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    </style>
+    <script src="https://cloudflare.com"></script>
+</head>
+<body>
+
+    <div class="container">
+        <div class="title" id="title-text">當前驗證碼為</div>
+        <div class="code-box" onclick="copyCode()">
+            <div class="code-text" id="auth-code">------</div>
+        </div>
+        <div class="countdown" id="countdown-text">倒計時 --s</div>
+        <div class="hint">點擊驗證碼會自動複製到剪貼簿</div>
+    </div>
+    <div class="toast" id="toast">已複製到剪貼簿</div>
+
+    <script>
+        // 【免費網頁專用逻辑】自動解析：網址/2fa/?您的密鑰 或 網址/2fa/#您的密鑰
+        let SECRET = "";
+        
+        // 1. 先嘗試讀取網址的 # 後面（例如：/2fa/#JBSWY3DPEHPK3PXP）
+        if (window.location.hash) {
+            SECRET = window.location.hash.substring(1);
+        } 
+        // 2. 如果沒有 #，嘗試讀取 ?secret= 或直接讀取 ? 後面的字串
+        else if (window.location.search) {
+            const urlParams = new URLSearchParams(window.location.search);
+            SECRET = urlParams.get('secret') || window.location.search.substring(1);
+        }
+
+        SECRET = SECRET.replace(/\s+/g, ''); // 移除空格
+        const totp = window.otplib.totp;
+
+        function updateTOTP() {
+            if (!SECRET) {
+                document.getElementById('auth-code').innerText = "無密鑰";
+                document.getElementById('title-text').innerText = "請在網址後加上您的密鑰";
+                return;
+            }
+            try {
+                document.getElementById('title-text').innerText = "當前驗證碼為";
+                const token = totp.generate(SECRET);
+                document.getElementById('auth-code').innerText = token.slice(0, 3) + " " + token.slice(3);
+            } catch (err) {
+                document.getElementById('auth-code').innerText = "ERROR";
+                document.getElementById('title-text').innerText = "密鑰格式不正確";
+            }
+        }
+
+        function updateCountdown() {
+            const epoch = Math.round(new Date().getTime() / 1000);
+            const remaining = 30 - (epoch % 30);
+            document.getElementById('countdown-text').innerText = `倒計時 ${remaining}s`;
+            if (remaining === 30 || document.getElementById('auth-code').innerText === "------") {
+                updateTOTP();
+            }
+        }
+
+        function copyCode() {
+            const code = document.getElementById('auth-code').innerText.replace(" ", "");
+            if (code === "------" || code === "ERROR" || code === "無密鑰") return;
+            navigator.clipboard.writeText(code).then(() => {
+                const toast = document.getElementById('toast');
+                toast.style.opacity = '1';
+                setTimeout(() => { toast.style.opacity = '0'; }, 1500);
+            });
+        }
+
+        setInterval(updateCountdown, 1000);
+        updateCountdown();
+    </script>
+</body>
+</html>
