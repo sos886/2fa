@@ -41,20 +41,19 @@
     <div class="toast" id="toast">已複製到剪貼簿</div>
 
     <script>
-        // 【免費網頁專用逻辑】自動解析：網址/2fa/?您的密鑰 或 網址/2fa/#您的密鑰
         let SECRET = "";
         
-        // 1. 先嘗試讀取網址的 # 後面（例如：/2fa/#JBSWY3DPEHPK3PXP）
+        // 1. 自動讀取網址的 # 號或 ? 號後面的密鑰
         if (window.location.hash) {
             SECRET = window.location.hash.substring(1);
-        } 
-        // 2. 如果沒有 #，嘗試讀取 ?secret= 或直接讀取 ? 後面的字串
-        else if (window.location.search) {
+        } else if (window.location.search) {
             const urlParams = new URLSearchParams(window.location.search);
             SECRET = urlParams.get('secret') || window.location.search.substring(1);
         }
 
-        SECRET = SECRET.replace(/\s+/g, ''); // 移除空格
+        // 💡【核心防錯優化】自動將小寫轉為大寫，並剔除所有空格、換行、制表符等雜質
+        SECRET = SECRET.toUpperCase().replace(/[\s\uFEFF\xA0]+/g, ''); 
+
         const totp = window.otplib.totp;
 
         function updateTOTP() {
@@ -65,11 +64,13 @@
             }
             try {
                 document.getElementById('title-text').innerText = "當前驗證碼為";
+                // 使用清理乾淨後的密鑰生成 2FA
                 const token = totp.generate(SECRET);
                 document.getElementById('auth-code').innerText = token.slice(0, 3) + " " + token.slice(3);
             } catch (err) {
                 document.getElementById('auth-code').innerText = "ERROR";
                 document.getElementById('title-text').innerText = "密鑰格式不正確";
+                console.error(err);
             }
         }
 
@@ -91,6 +92,12 @@
                 setTimeout(() => { toast.style.opacity = '0'; }, 1500);
             });
         }
+
+        // 監聽網址變化，當用戶在同一個頁面切換不同網址密鑰時，網頁會自動刷新
+        window.addEventListener('hashchange', () => {
+            SECRET = window.location.hash.substring(1).toUpperCase().replace(/[\s\uFEFF\xA0]+/g, '');
+            updateTOTP();
+        });
 
         setInterval(updateCountdown, 1000);
         updateCountdown();
