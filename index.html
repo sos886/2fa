@@ -26,7 +26,8 @@
         .hint { font-size: 11px; color: #4b5268; }
         .toast { position: fixed; bottom: 30px; background: rgba(255, 255, 255, 0.9); color: #171a2b; padding: 8px 16px; border-radius: 4px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     </style>
-    <script src="https://cloudflare.com"></script>
+    <!-- 使用穩定不掛掉的 UNPKG 節點引入 2FA 核心算法庫 -->
+    <script src="https://unpkg.com"></script>
 </head>
 <body>
 
@@ -41,19 +42,18 @@
     <div class="toast" id="toast">已複製到剪貼簿</div>
 
     <script>
-        let SECRET = "";
-        
-        // 1. 自動讀取網址的 # 號或 ? 號後面的密鑰
-        if (window.location.hash) {
-            SECRET = window.location.hash.substring(1);
-        } else if (window.location.search) {
-            const urlParams = new URLSearchParams(window.location.search);
-            SECRET = urlParams.get('secret') || window.location.search.substring(1);
+        function getSecret() {
+            let secret = "";
+            if (window.location.hash) {
+                secret = window.location.hash.substring(1);
+            } else if (window.location.search) {
+                const urlParams = new URLSearchParams(window.location.search);
+                secret = urlParams.get('secret') || window.location.search.substring(1);
+            }
+            return secret.toUpperCase().replace(/[\s\uFEFF\xA0]+/g, '');
         }
 
-        // 💡【核心防錯優化】自動將小寫轉為大寫，並剔除所有空格、換行、制表符等雜質
-        SECRET = SECRET.toUpperCase().replace(/[\s\uFEFF\xA0]+/g, ''); 
-
+        let SECRET = getSecret();
         const totp = window.otplib.totp;
 
         function updateTOTP() {
@@ -64,13 +64,11 @@
             }
             try {
                 document.getElementById('title-text').innerText = "當前驗證碼為";
-                // 使用清理乾淨後的密鑰生成 2FA
                 const token = totp.generate(SECRET);
                 document.getElementById('auth-code').innerText = token.slice(0, 3) + " " + token.slice(3);
             } catch (err) {
                 document.getElementById('auth-code').innerText = "ERROR";
                 document.getElementById('title-text').innerText = "密鑰格式不正確";
-                console.error(err);
             }
         }
 
@@ -78,7 +76,7 @@
             const epoch = Math.round(new Date().getTime() / 1000);
             const remaining = 30 - (epoch % 30);
             document.getElementById('countdown-text').innerText = `倒計時 ${remaining}s`;
-            if (remaining === 30 || document.getElementById('auth-code').innerText === "------") {
+            if (remaining === 30 || document.getElementById('auth-code').innerText === "------" || document.getElementById('auth-code').innerText === "無密鑰") {
                 updateTOTP();
             }
         }
@@ -93,12 +91,12 @@
             });
         }
 
-        // 監聽網址變化，當用戶在同一個頁面切換不同網址密鑰時，網頁會自動刷新
         window.addEventListener('hashchange', () => {
-            SECRET = window.location.hash.substring(1).toUpperCase().replace(/[\s\uFEFF\xA0]+/g, '');
+            SECRET = getSecret();
             updateTOTP();
         });
 
+        // 啟動計時器
         setInterval(updateCountdown, 1000);
         updateCountdown();
     </script>
